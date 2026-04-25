@@ -1,33 +1,19 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
 
-// ==========================
-// INIT
-// ==========================
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
 
-// WAJIB: init app dulu
 const app = express();
 app.use(express.json());
 
-// PORT untuk Railway
-const PORT = process.env.PORT || 3000;
-
 // ==========================
-// TEST ROOT (BIAR GAK 502)
-// ==========================
-app.get("/", (req, res) => {
-    res.send("SERVER HIDUP ✅");
-});
-
-// ==========================
-// CONNECT MONGODB
+// CONNECT DB
 // ==========================
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.log("❌ MongoDB error:", err));
+.catch(err => console.log(err));
 
 // ==========================
 // OPENAI
@@ -47,25 +33,31 @@ const Order = mongoose.model("Order", new mongoose.Schema({
 }));
 
 // ==========================
-// VERIFY WEBHOOK (WAJIB)
+// TEST ROUTE (BIAR GAK "CANNOT GET")
+// ==========================
+app.get("/", (req, res) => {
+    res.send("✅ Server hidup");
+});
+
+// ==========================
+// VERIFY WEBHOOK
 // ==========================
 app.get("/whatsapp", (req, res) => {
     const VERIFY_TOKEN = "rama123";
 
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-
-    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    if (
+        req.query["hub.mode"] === "subscribe" &&
+        req.query["hub.verify_token"] === VERIFY_TOKEN
+    ) {
         console.log("✅ WEBHOOK VERIFIED");
-        res.status(200).send(challenge);
-    } else {
-        res.sendStatus(403);
+        return res.status(200).send(req.query["hub.challenge"]);
     }
+
+    res.sendStatus(403);
 });
 
 // ==========================
-// AI PROCESS
+// AI
 // ==========================
 async function aiProcess(message) {
     const response = await openai.chat.completions.create({
@@ -74,18 +66,14 @@ async function aiProcess(message) {
             {
                 role: "system",
                 content: `
-Kamu adalah kasir cafe.
-Balas JSON saja:
+Balas JSON:
 {
   "intent": "order/menu/jam/lokasi/unknown",
   "items": [{"nama":"kopi","qty":2}]
 }
 `
             },
-            {
-                role: "user",
-                content: message
-            }
+            { role: "user", content: message }
         ]
     });
 
@@ -93,36 +81,37 @@ Balas JSON saja:
 }
 
 // ==========================
-// TERIMA PESAN WHATSAPP
+// TERIMA PESAN
 // ==========================
 app.post("/whatsapp", async (req, res) => {
 
-    console.log("📩 RAW:", JSON.stringify(req.body));
+    console.log("📩 MASUK:", JSON.stringify(req.body));
 
-    let msg;
-    let from;
+    let msg, from;
 
     try {
-        const data = req.body.entry?.[0]?.changes?.[0]?.value;
+        const value = req.body.entry?.[0]?.changes?.[0]?.value;
 
-        if (!data?.messages) {
-            return res.sendStatus(200);
-        }
+        if (!value?.messages) return res.sendStatus(200);
 
-        msg = data.messages[0].text.body;
-        from = data.messages[0].from;
+        msg = value.messages[0].text.body;
+        from = value.messages[0].from;
 
-    } catch (err) {
-        console.log("❌ PARSE ERROR:", err);
+    } catch {
         return res.sendStatus(200);
     }
 
     console.log("📩 PESAN:", msg);
 
-    // ==========================
-    // AI
-    // ==========================
-    let aiResult = await aiProcess(msg);
+    let reply = "Ketik: menu / pesan";
+
+    let aiResult;
+    try {
+        aiResult = await aiProcess(msg);
+    } catch (e) {
+        console.log("❌ AI ERROR:", e);
+        return res.sendStatus(200);
+    }
 
     let data;
     try {
@@ -131,22 +120,17 @@ app.post("/whatsapp", async (req, res) => {
         return res.sendStatus(200);
     }
 
-    // ==========================
-    // MENU
-    // ==========================
     const menu = {
         kopi: 15000,
         latte: 20000,
         cappuccino: 22000
     };
 
-    let reply = "Ketik: menu / pesan / riwayat / jam / lokasi";
-
     if (data.intent === "menu") {
         reply = "☕ kopi 15k\nlatte 20k\ncappuccino 22k";
     }
 
-    else if (data.intent === "order") {
+    if (data.intent === "order") {
         let total = 0;
         let detail = "";
 
@@ -168,49 +152,28 @@ app.post("/whatsapp", async (req, res) => {
         });
     }
 
-    else if (data.intent === "jam") {
-        reply = "🕒 Jam buka: 08:00 - 22:00";
-    }
-
-    else if (data.intent === "lokasi") {
-        reply = "📍 https://maps.google.com";
-    }
-
     // ==========================
-    // KIRIM BALASAN KE WA
+    // KIRIM KE WHATSAPP
     // ==========================
-    try {
-        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to: from,
-                type: "text",
-                text: { body: reply }
-            })
-        });
-    } catch (err) {
-        console.log("❌ ERROR SEND:", err);
-    }
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: from,
+            type: "text",
+            text: { body: reply }
+        })
+    });
 
     res.sendStatus(200);
 });
 
 // ==========================
-// DEBUG SEMUA REQUEST
-// ==========================
-app.post("*", (req, res) => {
-    console.log("🔥 MASUK SEMUA:", req.method, req.url);
-    res.sendStatus(200);
-});
-
-// ==========================
-// START SERVER
-// ==========================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log("🚀 Server jalan di port " + PORT);
 });
