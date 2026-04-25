@@ -12,6 +12,7 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.json());
