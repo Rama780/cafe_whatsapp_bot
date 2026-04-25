@@ -1,35 +1,38 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
+app.use((req, res, next) => {
+    console.log("🔥 ADA REQUEST MASUK:", req.method, req.url);
+    next();
+});
 
-require("dotenv").config({ path: "./.env" });
+require("dotenv").config();
+const express = require("express");
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
-mongoose.connect("mongodb+srv://puturamawan_db_user:YPwFqS27D8eq3eLr@cluster0.cv50ybl.mongodb.net/cafe?appName=Cluster0")
+const app = express();
+app.use(express.json()); // WAJIB
+
+// 🔗 CONNECT DB
+mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB connected"))
 .catch(err => console.log(err));
 
-const orderSchema = new mongoose.Schema({
+// 🤖 OPENAI
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+// 📦 MODEL
+const Order = mongoose.model("Order", new mongoose.Schema({
     user: String,
     pesanan: String,
     total: Number,
     waktu: String
-});
+}));
 
-const Order = mongoose.model("Order", orderSchema);
-
-let processedMessages = new Set();
-
-const express = require("express");
-const bodyParser = require("body-parser");
-
-const app = express();
-app.use(bodyParser.urlencoded({ extended: false }));
-
-
-// 👇 TEMPATKAN DI SINI
+// ==========================
+// ✅ VERIFY WEBHOOK
+// ==========================
 app.get("/whatsapp", (req, res) => {
     const VERIFY_TOKEN = "rama123";
 
@@ -45,53 +48,9 @@ app.get("/whatsapp", (req, res) => {
     }
 });
 
-// 👇 ini endpoint POST kamu
-app.post("/whatsapp", async (req, res) => {
-});
-
-app.listen(3000, () => {
-    console.log("🚀 Server jalan di http://localhost:3000");
-});
-
-
-app.use(express.json()); // penting untuk Meta
-
-// VERIFY WEBHOOK
-
-app.get("/webhook", (req, res) => {
-
-    const VERIFY_TOKEN = "rama123";
-
-    const mode = req.query["hub.mode"];
-
-    const token = req.query["hub.verify_token"];
-
-    const challenge = req.query["hub.challenge"];
-
-    if (mode && token === VERIFY_TOKEN) {
-
-        console.log("✅ Webhook verified!");
-
-        res.status(200).send(challenge);
-
-    } else {
-
-        res.sendStatus(403);
-
-    }
-
-});
-
-// TERIMA PESAN
-
-app.post("/webhook", (req, res) => {
-
-    console.log("📩 Pesan masuk:", JSON.stringify(req.body, null, 2));
-
-    res.sendStatus(200);
-
-}); 
-
+// ==========================
+// 🤖 AI PROCESS
+// ==========================
 async function aiProcess(message) {
     const response = await openai.chat.completions.create({
         model: "gpt-5.4-mini",
@@ -100,21 +59,11 @@ async function aiProcess(message) {
                 role: "system",
                 content: `
 Kamu adalah kasir cafe.
-
-Tugas:
-Ubah pesan user jadi JSON dengan format:
-
+Balas JSON saja:
 {
   "intent": "order/menu/jam/lokasi/unknown",
-  "items": [
-    {"nama":"kopi","qty":2}
-  ]
+  "items": [{"nama":"kopi","qty":2}]
 }
-
-Aturan:
-- hanya balas JSON
-- tanpa penjelasan
-- jika bukan order, items kosong
 `
             },
             {
@@ -127,127 +76,98 @@ Aturan:
     return response.choices[0].message.content;
 }
 
+// ==========================
+// 📩 TERIMA PESAN META
+// ==========================
 app.post("/whatsapp", async (req, res) => {
 
-    const messageId = req.body.MessageSid;
+    console.log("📩 RAW:", JSON.stringify(req.body));
 
-if (processedMessages.has(messageId)) {
-    console.log("⚠️ DUPLICATE MESSAGE, DIABAIKAN");
-    return res.send("<Response></Response>");
-}
+    let msg;
+    let from;
 
-processedMessages.add(messageId);
+    try {
+        const data = req.body.entry[0].changes[0].value;
 
-    console.log("📩 RAW BODY:", req.body);
+        if (!data.messages) return res.sendStatus(200);
 
-    let msg = (req.body.Body || "").toString();
-    msg = msg.toLowerCase().replace(/\s+/g, " ").trim();
+        msg = data.messages[0].text.body;
+        from = data.messages[0].from;
 
-    console.log("📩 ISI MSG:", msg);
-
-    let reply = "";
-
-    let aiResult = await aiProcess(msg);
-console.log("🤖 AI RAW:", aiResult);
-
-let aidata;
-
-try {
-    data = JSON.parse(aiResult);
-} catch {
-    reply = "Maaf, aku belum paham 😅";
-}
-
-  // 🧾 Data menu
-const menu = {
-    kopi: 15000,
-    latte: 20000,
-    cappuccino: 22000
-};
-
-// 🤖 AI RESULT
-let data;
-
-try {
-    data = JSON.parse(aiResult);
-} catch {
-    reply = "Maaf, aku belum paham 😅";
-}
-
-// 📋 MENU
-if (data.intent === "menu") {
-    reply = "☕ kopi 15k\nlatte 20k\ncappuccino 22k";
-}
-
-// 🛒 ORDER
-else if (data.intent === "order") {
-    let total = 0;
-    let detail = "";
-
-    for (let item of data.items) {
-        if (!menu[item.nama]) continue;
-
-        let subtotal = menu[item.nama] * item.qty;
-        total += subtotal;
-
-        detail += `- ${item.nama} x${item.qty} = Rp${subtotal}\n`;
+    } catch {
+        return res.sendStatus(200);
     }
 
-    reply = `🧾 Pesanan kamu:\n${detail}\n💰 Total: Rp${total}`;
+    console.log("📩 PESAN:", msg);
 
-    // ✅ simpan SEKALI saja
-    await Order.create({
-        user: req.body.From,
-        pesanan: detail,
-        total: total,
-        waktu: new Date().toLocaleString()
+    // 🤖 AI
+    let aiResult = await aiProcess(msg);
+
+    let data;
+    try {
+        data = JSON.parse(aiResult);
+    } catch {
+        return res.sendStatus(200);
+    }
+
+    // 📋 MENU
+    const menu = {
+        kopi: 15000,
+        latte: 20000,
+        cappuccino: 22000
+    };
+
+    let reply = "Ketik: menu / pesan / riwayat / jam / lokasi";
+
+    if (data.intent === "menu") {
+        reply = "☕ kopi 15k\nlatte 20k\ncappuccino 22k";
+    }
+
+    else if (data.intent === "order") {
+        let total = 0;
+        let detail = "";
+
+        for (let item of data.items) {
+            if (!menu[item.nama]) continue;
+
+            let subtotal = menu[item.nama] * item.qty;
+            total += subtotal;
+            detail += `- ${item.nama} x${item.qty} = Rp${subtotal}\n`;
+        }
+
+        reply = `🧾 Pesanan:\n${detail}\n💰 Rp${total}`;
+
+        await Order.create({
+            user: from,
+            pesanan: detail,
+            total,
+            waktu: new Date().toLocaleString()
+        });
+    }
+
+    // ==========================
+    // ❗ BALAS KE WHATSAPP META
+    // ==========================
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: from,
+            type: "text",
+            text: { body: reply }
+        })
     });
 
-    console.log("✅ Data tersimpan ke MongoDB");
-}
-
-// 📋 RIWAYAT
-else if (data.intent === "riwayat") {
-
-    const orders = await Order.find()
-        .find({ user: req.body.From })
-        .sort({ _id: -1 })
-        .limit(5);
-
-    if (orders.length === 0) {
-        reply = "Belum ada pesanan";
-    } else {
-        let history = orders.map((o, i) => 
-            `${i+1}. ${o.pesanan}💰 Rp${o.total}`
-        ).join("\n\n");
-
-        reply = `📋 Riwayat Pesanan Kamu:\n\n${history}`;
-    }
-}
-
-// 🕒 JAM
-else if (data.intent === "jam") {
-    reply = "🕒 Jam buka: 08:00 - 22:00";
-}
-
-// 📍 LOKASI
-else if (data.intent === "lokasi") {
-    reply = "📍 https://maps.google.com";
-}
-
-// 🤖 DEFAULT
-else {
-    reply = "Ketik: menu / pesan / riwayat / jam / lokasi";
-}
-
-    // 🤖 DEFAULT
-
-    console.log("📤 BALASAN:", reply);
-
-    res.set("Content-Type", "text/xml");
-    res.send(`<Response><Message>${reply}</Message></Response>`);
+    res.sendStatus(200);
 });
 
-app.listen(3000, () => {
-    console.log("🚀 Server jalan di http://localhost:3000");
+// ==========================
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log("🚀 Server jalan di port " + PORT);
 });
