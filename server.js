@@ -2,11 +2,19 @@ require("dotenv").config();
 
 const express = require("express");
 const mongoose = require("mongoose");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
 
 console.log("🔥 SERVER START");
+
+// ==========================
+// OPENAI
+// ==========================
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
 
 // ROOT
 app.get("/", (req, res) => {
@@ -33,7 +41,9 @@ app.get("/whatsapp", (req, res) => {
     res.sendStatus(403);
 });
 
+// ==========================
 // TERIMA PESAN
+// ==========================
 app.post("/whatsapp", async (req, res) => {
     console.log("📥 BODY:", JSON.stringify(req.body));
 
@@ -49,6 +59,28 @@ app.post("/whatsapp", async (req, res) => {
 
         console.log("📩 PESAN:", msg);
 
+        // ==========================
+        // AI RESPONSE
+        // ==========================
+        const ai = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: "Kamu adalah admin cafe yang ramah. Jawab singkat, santai, dan bantu customer memilih menu."
+                },
+                {
+                    role: "user",
+                    content: msg
+                }
+            ]
+        });
+
+        const reply = ai.choices[0].message.content;
+
+        // ==========================
+        // KIRIM KE WHATSAPP
+        // ==========================
         const response = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
             method: "POST",
             headers: {
@@ -59,7 +91,7 @@ app.post("/whatsapp", async (req, res) => {
                 messaging_product: "whatsapp",
                 to: from,
                 type: "text",
-                text: { body: "Halo dari bot 🚀" }
+                text: { body: reply }
             })
         });
 
@@ -75,7 +107,7 @@ app.post("/whatsapp", async (req, res) => {
 });
 
 // PORT
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 
 console.log("PORT DARI RAILWAY:", PORT);
 
