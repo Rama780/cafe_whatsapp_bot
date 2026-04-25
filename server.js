@@ -17,10 +17,6 @@ const fetch = require("node-fetch");
 const app = express();
 app.use(express.json());
 
-app.get("/", (req, res) => {
-    res.send("Server hidup");
-});
-
 // ==========================
 // CONNECT DB
 // ==========================
