@@ -1,5 +1,13 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
 
+process.on("uncaughtException", (err) => {
+    console.log("❌ ERROR:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+    console.log("❌ PROMISE ERROR:", err);
+});
+
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
@@ -178,6 +186,6 @@ app.post("/whatsapp", async (req, res) => {
 
 // ==========================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
     console.log("🚀 Server jalan di port " + PORT);
 });
