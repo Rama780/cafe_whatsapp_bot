@@ -81,27 +81,22 @@ app.post("/whatsapp", async (req, res) => {
         console.log("📩 PESAN:", msg);
 
         // BALAS SEDERHANA DULU (BUKAN AI)
-        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to: from,
-                type: "text",
-                text: { body: "Halo dari bot 🚀" }
-            })
-        });
-
-        res.sendStatus(200);
-
-    } catch (err) {
-        console.log("❌ ERROR WEBHOOK:", err);
-        res.sendStatus(200);
-    }
+    const response = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+    method: "POST",
+    headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: from,
+        type: "text",
+        text: { body: "Halo dari bot 🚀" }
+    })
 });
+
+const data = await response.text();
+console.log("📤 RESPONSE WA:", data);
 
 // ==========================
 const PORT = process.env.PORT;
