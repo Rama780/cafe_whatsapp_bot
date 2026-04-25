@@ -164,17 +164,28 @@ Rules:
         if (!reply) {
             try {
                 const aiChat = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [
+                        model: "gpt-4o-mini",
+                        messages: [
                         {
-                            role: "system",
-                            content: "Kamu admin cafe yang ramah. Jawab santai dan bantu customer memilih menu."
+                         role: "system",
+                         content: `
+                        Kamu admin cafe.
+
+                        Menu:
+                        - latte (20k)
+                        - cappuccino (22k)
+                        - americano (18k)
+
+                        Aturan:
+                        - Jangan keluar dari menu
+                        - Jawab santai dan singkat
+                        `
                         },
                         {
-                            role: "user",
-                            content: msg
-                        }
-                    ]
+                    role: "user",
+                        content: msg
+                         }
+                        ]
                 });
 
                 reply = aiChat.choices[0].message.content;
