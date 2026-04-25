@@ -1,5 +1,6 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
 
+
 process.on("uncaughtException", (err) => {
     console.log("❌ ERROR:", err);
 });
@@ -103,7 +104,8 @@ app.post("/whatsapp", async (req, res) => {
 });
 
 // ==========================
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
+console.log("PORT DARI RAILWAY:", process.env.PORT);
 
 app.listen(PORT, "0.0.0.0", () => {
     console.log("🚀 Server jalan di port " + PORT);
