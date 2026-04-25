@@ -27,8 +27,7 @@ const bodyParser = require("body-parser");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
-const app = express();
-app.use(bodyParser.urlencoded({ extended: false }));
+
 
 // 👇 TEMPATKAN DI SINI
 app.get("/whatsapp", (req, res) => {
