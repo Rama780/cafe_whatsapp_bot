@@ -1,8 +1,5 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
-app.use((req, res, next) => {
-    console.log("🔥 ADA REQUEST MASUK:", req.method, req.url);
-    next();
-});
+
 
 require("dotenv").config();
 const express = require("express");
@@ -10,7 +7,12 @@ const mongoose = require("mongoose");
 const OpenAI = require("openai");
 
 const app = express();
-app.use(express.json()); // WAJIB
+app.use(express.json()); // WAJIB 
+
+app.use((req, res, next) => {
+    console.log("🔥 ADA REQUEST MASUK:", req.method, req.url);
+    next();
+});
 
 // 🔗 CONNECT DB
 mongoose.connect(process.env.MONGO_URI)
