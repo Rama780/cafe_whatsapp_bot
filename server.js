@@ -21,7 +21,7 @@ const openai = new OpenAI({
 // ==========================
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.log(err));
+.catch(err => console.log("❌ DB ERROR:", err.message));
 
 const Order = mongoose.model("Order", new mongoose.Schema({
     user: String,
@@ -55,6 +55,15 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
+// MENU DATA
+// ==========================
+const menu = {
+    latte: 20000,
+    cappuccino: 22000,
+    americano: 18000
+};
+
+// ==========================
 // TERIMA PESAN
 // ==========================
 app.post("/whatsapp", async (req, res) => {
@@ -62,7 +71,6 @@ app.post("/whatsapp", async (req, res) => {
 
     try {
         const value = req.body.entry?.[0]?.changes?.[0]?.value;
-
         if (!value?.messages) return res.sendStatus(200);
 
         const msg = value.messages[0].text.body.toLowerCase();
@@ -71,9 +79,9 @@ app.post("/whatsapp", async (req, res) => {
         console.log("📩 PESAN:", msg);
 
         // ==========================
-        // AI PROCESS
+        // STEP 1: AI DETEKSI INTENT
         // ==========================
-        let data;
+        let data = { intent: "unknown", items: [] };
 
         try {
             const ai = await openai.chat.completions.create({
@@ -82,19 +90,16 @@ app.post("/whatsapp", async (req, res) => {
                     {
                         role: "system",
                         content: `
-Kamu adalah kasir cafe.
-
-Ubah pesan user jadi JSON:
+Ubah pesan user menjadi JSON:
 
 {
   "intent": "order/menu/jam/lokasi/unknown",
   "items": [{"nama":"latte","qty":2}]
 }
 
-Aturan:
+Rules:
 - hanya JSON
 - tanpa penjelasan
-- jika bukan order, items kosong
 `
                     },
                     { role: "user", content: msg }
@@ -104,31 +109,18 @@ Aturan:
             data = JSON.parse(ai.choices[0].message.content);
 
         } catch (err) {
-            console.log("❌ AI ERROR:", err.message);
-            data = { intent: "unknown", items: [] };
+            console.log("❌ AI JSON ERROR:", err.message);
         }
 
-        // ==========================
-        // MENU DATA
-        // ==========================
-        const menu = {
-            latte: 20000,
-            cappuccino: 22000,
-            americano: 18000
-        };
-
-        let reply = "Ketik: menu / pesan / jam / lokasi";
+        let reply;
 
         // ==========================
-        // LOGIC
+        // STEP 2: LOGIC SYSTEM
         // ==========================
-
-        // MENU
         if (data.intent === "menu") {
             reply = "☕ latte 20k\ncappuccino 22k\namericano 18k";
         }
 
-        // ORDER
         else if (data.intent === "order") {
             let total = 0;
             let detail = "";
@@ -136,18 +128,15 @@ Aturan:
             for (let item of data.items) {
                 if (!menu[item.nama]) continue;
 
-                let subtotal = menu[item.nama] * item.qty;
+                const subtotal = menu[item.nama] * item.qty;
                 total += subtotal;
 
                 detail += `- ${item.nama} x${item.qty} = Rp${subtotal}\n`;
             }
 
-            if (total === 0) {
-                reply = "Menu tidak ditemukan 😅";
-            } else {
+            if (total > 0) {
                 reply = `🧾 Pesanan:\n${detail}\n💰 Total: Rp${total}`;
 
-                // SIMPAN KE DB
                 await Order.create({
                     user: from,
                     pesanan: detail,
@@ -156,23 +145,52 @@ Aturan:
                 });
 
                 console.log("✅ Order tersimpan");
+            } else {
+                reply = "Menu tidak ditemukan 😅";
             }
         }
 
-        // JAM
         else if (data.intent === "jam") {
             reply = "🕒 Jam buka: 08:00 - 22:00";
         }
 
-        // LOKASI
         else if (data.intent === "lokasi") {
             reply = "📍 https://maps.google.com";
         }
 
         // ==========================
-        // KIRIM KE WHATSAPP
+        // STEP 3: AI CHAT (FALLBACK)
         // ==========================
-        const response = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+        if (!reply) {
+            try {
+                const aiChat = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        {
+                            role: "system",
+                            content: "Kamu admin cafe yang ramah. Jawab santai dan bantu customer memilih menu."
+                        },
+                        {
+                            role: "user",
+                            content: msg
+                        }
+                    ]
+                });
+
+                reply = aiChat.choices[0].message.content;
+
+            } catch (err) {
+                console.log("❌ AI CHAT ERROR:", err.message);
+                reply = "Maaf, sistem sedang sibuk 😅";
+            }
+        }
+
+        console.log("🤖 FINAL REPLY:", reply);
+
+        // ==========================
+        // STEP 4: KIRIM KE WHATSAPP
+        // ==========================
+        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
@@ -185,9 +203,6 @@ Aturan:
                 text: { body: reply }
             })
         });
-
-        const result = await response.text();
-        console.log("📤 RESPONSE WA:", result);
 
         res.sendStatus(200);
 
