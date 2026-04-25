@@ -8,6 +8,10 @@ const OpenAI = require("openai");
 const app = express();
 app.use(express.json());
 
+app.get("/", (req, res) => {
+    res.send("Server hidup");
+});
+
 // ==========================
 // CONNECT DB
 // ==========================
