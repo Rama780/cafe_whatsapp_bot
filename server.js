@@ -155,7 +155,7 @@ app.post("/whatsapp", async (req, res) => {
     // ==========================
     // KIRIM KE WHATSAPP
     // ==========================
-    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
