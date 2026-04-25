@@ -1,30 +1,44 @@
 console.log("🔥 SERVER WHATSAPP FINAL AKTIF");
 
-
+// ==========================
+// INIT
+// ==========================
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
 
+// WAJIB: init app dulu
 const app = express();
-app.use(express.json()); // WAJIB 
+app.use(express.json());
 
-app.use((req, res, next) => {
-    console.log("🔥 ADA REQUEST MASUK:", req.method, req.url);
-    next();
+// PORT untuk Railway
+const PORT = process.env.PORT || 3000;
+
+// ==========================
+// TEST ROOT (BIAR GAK 502)
+// ==========================
+app.get("/", (req, res) => {
+    res.send("SERVER HIDUP ✅");
 });
 
-// 🔗 CONNECT DB
+// ==========================
+// CONNECT MONGODB
+// ==========================
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.log(err));
+.catch(err => console.log("❌ MongoDB error:", err));
 
-// 🤖 OPENAI
+// ==========================
+// OPENAI
+// ==========================
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-// 📦 MODEL
+// ==========================
+// MODEL
+// ==========================
 const Order = mongoose.model("Order", new mongoose.Schema({
     user: String,
     pesanan: String,
@@ -33,7 +47,7 @@ const Order = mongoose.model("Order", new mongoose.Schema({
 }));
 
 // ==========================
-// ✅ VERIFY WEBHOOK
+// VERIFY WEBHOOK (WAJIB)
 // ==========================
 app.get("/whatsapp", (req, res) => {
     const VERIFY_TOKEN = "rama123";
@@ -51,7 +65,7 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
-// 🤖 AI PROCESS
+// AI PROCESS
 // ==========================
 async function aiProcess(message) {
     const response = await openai.chat.completions.create({
@@ -79,7 +93,7 @@ Balas JSON saja:
 }
 
 // ==========================
-// 📩 TERIMA PESAN META
+// TERIMA PESAN WHATSAPP
 // ==========================
 app.post("/whatsapp", async (req, res) => {
 
@@ -89,20 +103,25 @@ app.post("/whatsapp", async (req, res) => {
     let from;
 
     try {
-        const data = req.body.entry[0].changes[0].value;
+        const data = req.body.entry?.[0]?.changes?.[0]?.value;
 
-        if (!data.messages) return res.sendStatus(200);
+        if (!data?.messages) {
+            return res.sendStatus(200);
+        }
 
         msg = data.messages[0].text.body;
         from = data.messages[0].from;
 
-    } catch {
+    } catch (err) {
+        console.log("❌ PARSE ERROR:", err);
         return res.sendStatus(200);
     }
 
     console.log("📩 PESAN:", msg);
 
-    // 🤖 AI
+    // ==========================
+    // AI
+    // ==========================
     let aiResult = await aiProcess(msg);
 
     let data;
@@ -112,7 +131,9 @@ app.post("/whatsapp", async (req, res) => {
         return res.sendStatus(200);
     }
 
-    // 📋 MENU
+    // ==========================
+    // MENU
+    // ==========================
     const menu = {
         kopi: 15000,
         latte: 20000,
@@ -147,29 +168,49 @@ app.post("/whatsapp", async (req, res) => {
         });
     }
 
+    else if (data.intent === "jam") {
+        reply = "🕒 Jam buka: 08:00 - 22:00";
+    }
+
+    else if (data.intent === "lokasi") {
+        reply = "📍 https://maps.google.com";
+    }
+
     // ==========================
-    // ❗ BALAS KE WHATSAPP META
+    // KIRIM BALASAN KE WA
     // ==========================
-    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: from,
-            type: "text",
-            text: { body: reply }
-        })
-    });
+    try {
+        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                to: from,
+                type: "text",
+                text: { body: reply }
+            })
+        });
+    } catch (err) {
+        console.log("❌ ERROR SEND:", err);
+    }
 
     res.sendStatus(200);
 });
 
 // ==========================
-const PORT = process.env.PORT || 3000;
+// DEBUG SEMUA REQUEST
+// ==========================
+app.post("*", (req, res) => {
+    console.log("🔥 MASUK SEMUA:", req.method, req.url);
+    res.sendStatus(200);
+});
 
+// ==========================
+// START SERVER
+// ==========================
 app.listen(PORT, () => {
     console.log("🚀 Server jalan di port " + PORT);
 });
