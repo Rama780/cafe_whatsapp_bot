@@ -92,7 +92,7 @@ async function sendWA(to, text) {
 // SEND QR
 // ==========================
 async function sendQR(to) {
-    const qrImage = "https://i.ibb.co/YTB9hTTn/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
+    const qrImage = "https://i.ibb.co/zWZVGbxy/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
 
     const resWA = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
         method: "POST",
