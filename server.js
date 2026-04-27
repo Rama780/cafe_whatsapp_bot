@@ -28,7 +28,7 @@ const Order = mongoose.model("Order", new mongoose.Schema({
         }
     ],
     total: Number,
-    status: { type: String, default: "pending" },
+    status: { type: String, default: "pending" }, // pending, waiting_confirmation, paid, rejected
     waktu: { type: Date, default: Date.now }
 }));
 
@@ -92,9 +92,9 @@ async function sendWA(to, text) {
 // SEND QR
 // ==========================
 async function sendQR(to) {
-    const qrImage = "https://i.ibb.co/zWZVGbxy/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
+    const qrImage = "https://i.ibb.co/YTB9hTTn/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
 
-    const resWA = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
@@ -110,9 +110,6 @@ async function sendQR(to) {
             }
         })
     });
-
-    const data = await resWA.json();
-    console.log("QR RESPONSE:", data);
 }
 
 // ==========================
@@ -123,153 +120,236 @@ app.post("/whatsapp", async (req, res) => {
         const value = req.body.entry?.[0]?.changes?.[0]?.value;
         if (!value?.messages) return res.sendStatus(200);
 
-        const msg = value.messages[0].text.body.toLowerCase();
-        const from = value.messages[0].from;
+        const message = value.messages[0];
+        const from = message.from;
 
-        console.log("📩 PESAN:", msg);
+        console.log("📩 INCOMING:", message.type);
 
         // ==========================
-        // 1. KONFIRMASI BAYAR
+        // OWNER COMMAND (ACC / TOLAK)
         // ==========================
-        if (msg.includes("sudah bayar")) {
+        if (from === process.env.OWNER_NUMBER && message.type === "text") {
+            const msg = message.text.body.toLowerCase();
+
+            if (msg.startsWith("acc")) {
+                const orderId = msg.split(" ")[1];
+
+                const order = await Order.findById(orderId);
+                if (!order) {
+                    await sendWA(from, "Order tidak ditemukan");
+                    return res.sendStatus(200);
+                }
+
+                await Order.findByIdAndUpdate(orderId, { status: "paid" });
+
+                await sendWA(order.user, "✅ Pembayaran diterima, pesanan diproses ☕");
+                await sendWA(from, "✅ Order di-ACC");
+
+                return res.sendStatus(200);
+            }
+
+            if (msg.startsWith("tolak")) {
+                const orderId = msg.split(" ")[1];
+
+                const order = await Order.findById(orderId);
+                if (!order) {
+                    await sendWA(from, "Order tidak ditemukan");
+                    return res.sendStatus(200);
+                }
+
+                await Order.findByIdAndUpdate(orderId, { status: "rejected" });
+
+                await sendWA(order.user, "❌ Pembayaran ditolak");
+                await sendWA(from, "❌ Order ditolak");
+
+                return res.sendStatus(200);
+            }
+        }
+
+        // ==========================
+        // HANDLE IMAGE (BUKTI TRANSFER)
+        // ==========================
+        if (message.type === "image") {
             const orderId = lastOrderMap[from];
 
             if (!orderId) {
                 await sendWA(from, "Tidak ada transaksi 😅");
-            } else {
-                await Order.findByIdAndUpdate(orderId, { status: "paid" });
-                await sendWA(from, "✅ Pembayaran diterima!");
-            }
-
-            return res.sendStatus(200);
-        }
-
-        // ==========================
-        // 2. PILIH PEMBAYARAN
-        // ==========================
-        if (msg === "1" || msg === "2") {
-            const orderId = paymentChoice[from];
-
-            if (!orderId) {
-                await sendWA(from, "Tidak ada pesanan 😅");
                 return res.sendStatus(200);
             }
 
-            // LINK
-            if (msg === "1") {
-                const link = `https://your-payment-link.com/pay/${orderId}`;
-                await sendWA(from, `💳 Bayar di sini:\n${link}\n\nSetelah bayar ketik: sudah bayar`);
-            }
+            await Order.findByIdAndUpdate(orderId, {
+                status: "waiting_confirmation"
+            });
 
-            // QR
-            if (msg === "2") {
-                await sendQR(from);
-            }
+            await sendWA(from, "⏳ Bukti diterima, sedang dicek admin");
+
+            const imageId = message.image.id;
+
+            const resImg = await fetch(`https://graph.facebook.com/v19.0/${imageId}`, {
+                headers: {
+                    Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`
+                }
+            });
+
+            const imgData = await resImg.json();
+
+            await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    to: process.env.OWNER_NUMBER,
+                    type: "image",
+                    image: {
+                        link: imgData.url,
+                        caption: `📥 Bukti transfer
+
+User: ${from}
+Order: ${orderId}
+
+Ketik:
+ACC ${orderId}
+atau
+TOLAK ${orderId}`
+                    }
+                })
+            });
 
             return res.sendStatus(200);
         }
 
         // ==========================
-        // 3. RIWAYAT
+        // TEXT MESSAGE
         // ==========================
-        if (
-            msg.includes("riwayat") ||
-            msg.includes("history") ||
-            msg.includes("pesanan")
-        ) {
-            const orders = await Order.find({ user: from })
-                .sort({ waktu: -1 })
-                .limit(5);
+        if (message.type === "text") {
+            const msg = message.text.body.toLowerCase();
 
-            let reply;
+            console.log("📩 PESAN:", msg);
 
-            if (orders.length === 0) {
-                reply = "Belum ada pesanan 😅";
-            } else {
-                reply = "🧾 Riwayat:\n\n";
+            // ==========================
+            // PILIH PEMBAYARAN
+            // ==========================
+            if (msg === "1" || msg === "2") {
+                const orderId = paymentChoice[from];
+
+                if (!orderId) {
+                    await sendWA(from, "Tidak ada pesanan 😅");
+                    return res.sendStatus(200);
+                }
+
+                // QRIS
+                if (msg === "1") {
+                    await sendQR(from);
+                }
+
+                // TRANSFER
+                if (msg === "2") {
+                    await sendWA(from, `🏦 Transfer ke:
+
+Bank BCA
+No Rek: 1234567890
+A/N: Cafe Kamu
+
+Setelah transfer, kirim bukti screenshot di sini 📸`);
+                }
+
+                return res.sendStatus(200);
+            }
+
+            // ==========================
+            // RIWAYAT
+            // ==========================
+            if (msg.includes("riwayat")) {
+                const orders = await Order.find({ user: from })
+                    .sort({ waktu: -1 })
+                    .limit(5);
+
+                let reply = orders.length
+                    ? "🧾 Riwayat:\n\n"
+                    : "Belum ada pesanan 😅";
 
                 orders.forEach((o, i) => {
                     reply += `Pesanan ${i + 1}\n`;
-
                     o.items.forEach(item => {
                         reply += `- ${item.nama} x${item.qty}\n`;
                     });
-
-                    reply += `💰 Rp${o.total}\n`;
-                    reply += `🕒 ${new Date(o.waktu).toLocaleString()}\n\n`;
+                    reply += `💰 Rp${o.total}\n\n`;
                 });
+
+                await sendWA(from, reply);
+                return res.sendStatus(200);
             }
 
-            await sendWA(from, reply);
-            return res.sendStatus(200);
-        }
+            // ==========================
+            // MENU
+            // ==========================
+            if (msg.includes("menu")) {
+                await sendWA(from, "☕ latte 20k\ncappuccino 22k\namericano 18k");
+                return res.sendStatus(200);
+            }
 
-        // ==========================
-        // 4. MENU
-        // ==========================
-        if (msg.includes("menu")) {
-            await sendWA(from, "☕ latte 20k\ncappuccino 22k\namericano 18k");
-            return res.sendStatus(200);
-        }
+            // ==========================
+            // ORDER
+            // ==========================
+            if (
+                msg.includes("latte") ||
+                msg.includes("cappuccino") ||
+                msg.includes("americano")
+            ) {
+                let total = 0;
+                let detail = "";
+                let itemsDB = [];
 
-        // ==========================
-        // 5. ORDER
-        // ==========================
-        if (
-            msg.includes("latte") ||
-            msg.includes("cappuccino") ||
-            msg.includes("americano")
-        ) {
-            let total = 0;
-            let detail = "";
-            let itemsDB = [];
+                for (let key in menu) {
+                    if (msg.includes(key)) {
+                        const qtyMatch = msg.match(/\d+/);
+                        const qty = qtyMatch ? parseInt(qtyMatch[0]) : 1;
 
-            for (let key in menu) {
-                if (msg.includes(key)) {
-                    const qtyMatch = msg.match(/\d+/);
-                    const qty = qtyMatch ? parseInt(qtyMatch[0]) : 1;
+                        const harga = menu[key];
+                        const subtotal = harga * qty;
 
-                    const harga = menu[key];
-                    const subtotal = harga * qty;
+                        total += subtotal;
 
-                    total += subtotal;
+                        detail += `- ${key} x${qty} = Rp${subtotal}\n`;
 
-                    detail += `- ${key} x${qty} = Rp${subtotal}\n`;
-
-                    itemsDB.push({ nama: key, qty, harga });
+                        itemsDB.push({ nama: key, qty, harga });
+                    }
                 }
-            }
 
-            if (total > 0) {
-                const newOrder = await Order.create({
-                    user: from,
-                    items: itemsDB,
-                    total
-                });
+                if (total > 0) {
+                    const newOrder = await Order.create({
+                        user: from,
+                        items: itemsDB,
+                        total
+                    });
 
-                lastOrderMap[from] = newOrder._id;
-                paymentChoice[from] = newOrder._id;
+                    lastOrderMap[from] = newOrder._id;
+                    paymentChoice[from] = newOrder._id;
 
-                const reply = `🧾 Pesanan:
+                    const reply = `🧾 Pesanan:
 ${detail}
 💰 Total: Rp${total}
 
-💳 Pilih pembayaran:
-1. Link
-2. QR
+💳 Metode pembayaran:
+1. QRIS
+2. Transfer Bank
 
 Ketik: 1 atau 2`;
 
-                await sendWA(from, reply);
+                    await sendWA(from, reply);
+                }
+
+                return res.sendStatus(200);
             }
 
+            // DEFAULT
+            await sendWA(from, "Ketik *menu* ya ☕");
             return res.sendStatus(200);
         }
 
-        // ==========================
-        // DEFAULT
-        // ==========================
-        await sendWA(from, "Ketik *menu* ya ☕");
         res.sendStatus(200);
 
     } catch (err) {
