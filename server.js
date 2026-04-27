@@ -25,9 +25,18 @@ mongoose.connect(process.env.MONGO_URI)
 
 const Order = mongoose.model("Order", new mongoose.Schema({
     user: String,
-    pesanan: String,
+    items: [
+        {
+            nama: String,
+            qty: Number,
+            harga: Number
+        }
+    ],
     total: Number,
-    waktu: String
+    waktu: {
+        type: Date,
+        default: Date.now
+    }
 }));
 
 // ==========================
@@ -55,7 +64,7 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
-// MENU DATA
+// MENU
 // ==========================
 const menu = {
     latte: 20000,
@@ -79,7 +88,42 @@ app.post("/whatsapp", async (req, res) => {
         console.log("📩 PESAN:", msg);
 
         // ==========================
-        // STEP 1: AI DETEKSI INTENT
+        // HISTORY MANUAL (ANTI GAGAL AI)
+        // ==========================
+        if (
+            msg.includes("riwayat") ||
+            msg.includes("history") ||
+            msg.includes("pesanan saya")
+        ) {
+            const orders = await Order.find({ user: from })
+                .sort({ waktu: -1 })
+                .limit(5);
+
+            let reply;
+
+            if (orders.length === 0) {
+                reply = "Kamu belum punya pesanan 😅";
+            } else {
+                reply = "🧾 Riwayat Pesanan Kamu:\n\n";
+
+                orders.forEach((order, index) => {
+                    reply += `Pesanan ${index + 1}:\n`;
+
+                    order.items.forEach(item => {
+                        reply += `- ${item.nama} x${item.qty}\n`;
+                    });
+
+                    reply += `💰 Total: Rp${order.total}\n`;
+                    reply += `🕒 ${new Date(order.waktu).toLocaleString()}\n\n`;
+                });
+            }
+
+            await sendWA(from, reply);
+            return res.sendStatus(200);
+        }
+
+        // ==========================
+        // AI DETEKSI
         // ==========================
         let data = { intent: "unknown", items: [] };
 
@@ -90,16 +134,15 @@ app.post("/whatsapp", async (req, res) => {
                     {
                         role: "system",
                         content: `
-Ubah pesan user menjadi JSON:
+Ubah pesan user jadi JSON:
 
 {
-  "intent": "order/menu/jam/lokasi/unknown",
-  "items": [{"nama":"latte","qty":2}]
+ "intent":"order/menu/jam/lokasi/history/unknown",
+ "items":[{"nama":"latte","qty":2}]
 }
 
 Rules:
 - hanya JSON
-- tanpa penjelasan
 `
                     },
                     { role: "user", content: msg }
@@ -109,13 +152,13 @@ Rules:
             data = JSON.parse(ai.choices[0].message.content);
 
         } catch (err) {
-            console.log("❌ AI JSON ERROR:", err.message);
+            console.log("❌ AI ERROR:", err.message);
         }
 
         let reply;
 
         // ==========================
-        // STEP 2: LOGIC SYSTEM
+        // LOGIC
         // ==========================
         if (data.intent === "menu") {
             reply = "☕ latte 20k\ncappuccino 22k\namericano 18k";
@@ -124,14 +167,25 @@ Rules:
         else if (data.intent === "order") {
             let total = 0;
             let detail = "";
+            let itemsDB = [];
 
             for (let item of data.items) {
-                if (!menu[item.nama]) continue;
+                const nama = item.nama?.toLowerCase().trim();
 
-                const subtotal = menu[item.nama] * item.qty;
+                if (!menu[nama]) continue;
+
+                const harga = menu[nama];
+                const subtotal = harga * item.qty;
+
                 total += subtotal;
 
-                detail += `- ${item.nama} x${item.qty} = Rp${subtotal}\n`;
+                detail += `- ${nama} x${item.qty} = Rp${subtotal}\n`;
+
+                itemsDB.push({
+                    nama,
+                    qty: item.qty,
+                    harga
+                });
             }
 
             if (total > 0) {
@@ -139,10 +193,11 @@ Rules:
 
                 await Order.create({
                     user: from,
-                    pesanan: detail,
-                    total,
-                    waktu: new Date().toLocaleString()
+                    items: itemsDB,
+                    total
                 });
+
+                reply += "\n\nMau tambah lagi atau checkout? 😄";
 
                 console.log("✅ Order tersimpan");
             } else {
@@ -159,61 +214,46 @@ Rules:
         }
 
         // ==========================
-        // STEP 3: AI CHAT (FALLBACK)
+        // AI CHAT
         // ==========================
         if (!reply) {
             try {
                 const aiChat = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
+                    model: "gpt-4o-mini",
+                    messages: [
                         {
-                         role: "system",
-                         content: `
-                        Kamu admin cafe.
+                            role: "system",
+                            content: `
+Kamu admin cafe.
 
-                        Menu:
-                        - latte (20k)
-                        - cappuccino (22k)
-                        - americano (18k)
+Menu:
+- latte (20k)
+- cappuccino (22k)
+- americano (18k)
 
-                        Aturan:
-                        - Jangan keluar dari menu
-                        - Jawab santai dan singkat
-                        `
+Tugas:
+- bantu user pesan
+- upsell ringan
+- jawab santai
+`
                         },
-                        {
-                    role: "user",
-                        content: msg
-                         }
-                        ]
+                        { role: "user", content: msg }
+                    ]
                 });
 
                 reply = aiChat.choices[0].message.content;
 
             } catch (err) {
-                console.log("❌ AI CHAT ERROR:", err.message);
-                reply = "Maaf, sistem sedang sibuk 😅";
+                reply = "Maaf, sistem sibuk 😅";
             }
         }
 
-        console.log("🤖 FINAL REPLY:", reply);
+        console.log("🤖 REPLY:", reply);
 
         // ==========================
-        // STEP 4: KIRIM KE WHATSAPP
+        // KIRIM WA
         // ==========================
-        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to: from,
-                type: "text",
-                text: { body: reply }
-            })
-        });
+        await sendWA(from, reply);
 
         res.sendStatus(200);
 
@@ -224,9 +264,26 @@ Rules:
 });
 
 // ==========================
-const PORT = process.env.PORT || 3000;
+// FUNCTION KIRIM WA
+// ==========================
+async function sendWA(to, text) {
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to,
+            type: "text",
+            text: { body: text }
+        })
+    });
+}
 
-console.log("PORT:", PORT);
+// ==========================
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
     console.log("🚀 Server jalan di port " + PORT);
