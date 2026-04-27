@@ -71,7 +71,7 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
-// SEND WA TEXT
+// SEND TEXT
 // ==========================
 async function sendWA(to, text) {
     await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
@@ -89,12 +89,12 @@ async function sendWA(to, text) {
 }
 
 // ==========================
-// SEND QR IMAGE
+// SEND QR
 // ==========================
 async function sendQR(to) {
-    const qrImage = "https://i.ibb.co/your-qr-image.png"; // GANTI DENGAN QR KAMU
+    const qrImage = "https://i.ibb.co/YTB9hTTn/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
 
-    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+    const resWA = await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
         method: "POST",
         headers: {
             Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
@@ -102,7 +102,7 @@ async function sendQR(to) {
         },
         body: JSON.stringify({
             messaging_product: "whatsapp",
-            to,
+            to: to,
             type: "image",
             image: {
                 link: qrImage,
@@ -110,6 +110,9 @@ async function sendQR(to) {
             }
         })
     });
+
+    const data = await resWA.json();
+    console.log("QR RESPONSE:", data);
 }
 
 // ==========================
