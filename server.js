@@ -33,9 +33,10 @@ const Order = mongoose.model("Order", new mongoose.Schema({
 }));
 
 // ==========================
-// MEMORY
+// MEMORY (STATE)
 // ==========================
 const paymentChoice = {};
+const userState = {};
 
 // ==========================
 // MENU
@@ -102,7 +103,7 @@ async function sendWA(to, text) {
 // SEND QR
 // ==========================
 async function sendQR(to) {
-    const qrImage = "https://i.ibb.co/zWZVGbxy/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
+    const qrImage = "https://i.ibb.co/YTB9hTTn/Whats-App-Image-2026-04-27-at-10-26-45.jpg";
 
     await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
         method: "POST",
@@ -143,7 +144,7 @@ app.post("/whatsapp", async (req, res) => {
         console.log("📩 PESAN:", msg);
 
         // ==========================
-        // MENU (LEBIH RAMAH)
+        // MENU (RAMAH)
         // ==========================
         if (msg.includes("menu")) {
 
@@ -154,6 +155,8 @@ app.post("/whatsapp", async (req, res) => {
             ];
 
             const greet = greetings[Math.floor(Math.random() * greetings.length)];
+
+            userState[from] = "MENU";
 
             await sendWA(from, `${greet}
 
@@ -176,6 +179,7 @@ Contoh: *latte 2*`);
             msg.includes("cappuccino") ||
             msg.includes("americano")
         ) {
+
             let total = 0;
             let detail = "";
             let itemsDB = [];
@@ -203,12 +207,13 @@ Contoh: *latte 2*`);
                 });
 
                 paymentChoice[from] = order._id;
+                userState[from] = "WAITING_PAYMENT";
 
                 await sendWA(from, `🧾 Pesanan kamu:
 ${detail}
 💰 Total: Rp${total}
 
-Silakan pilih metode pembayaran ya 😊
+Silakan pilih metode pembayaran 😊
 
 1. QRIS 📱
 2. Transfer Bank 🏦
@@ -220,13 +225,19 @@ Ketik: 1 atau 2`);
         }
 
         // ==========================
-        // PILIH PEMBAYARAN
+        // PILIH PEMBAYARAN (LOCKED)
         // ==========================
         if (msg === "1" || msg === "2") {
+
+            if (userState[from] !== "WAITING_PAYMENT") {
+                await sendWA(from, "Silakan pesan dulu ya 😊\nKetik *menu* untuk mulai ☕");
+                return res.sendStatus(200);
+            }
+
             const orderId = paymentChoice[from];
 
             if (!orderId) {
-                await sendWA(from, "Ups, belum ada pesanan 😅\nKetik *menu* dulu ya ☕");
+                await sendWA(from, "Tidak ada pesanan 😅");
                 return res.sendStatus(200);
             }
 
@@ -244,25 +255,36 @@ A/N: Cafe Kamu
 Setelah transfer, ketik *sudah bayar* ya 😊`);
             }
 
+            userState[from] = "WAITING_CONFIRM";
+
             return res.sendStatus(200);
         }
 
         // ==========================
-        // SUDAH BAYAR (RAMAH)
+        // SUDAH BAYAR (LOCKED)
         // ==========================
         if (msg.includes("sudah bayar")) {
+
+            if (userState[from] !== "WAITING_CONFIRM") {
+                await sendWA(from, "Kamu belum melakukan pembayaran 😊");
+                return res.sendStatus(200);
+            }
+
             await sendWA(from, `🙏 Terima kasih ya!
 
-Pembayaran kamu sudah kami terima (akan dicek secara manual).
+Pembayaran kamu sudah kami terima (akan dicek manual).
 
-☕ Pesanan sedang kami proses, mohon ditunggu sebentar 😊`);
+☕ Pesanan sedang diproses 😊`);
+
+            userState[from] = "DONE";
+
             return res.sendStatus(200);
         }
 
         // ==========================
         // DEFAULT
         // ==========================
-        await sendWA(from, "Halo 😊\nKetik *menu* untuk lihat daftar kopi kami ya ☕");
+        await sendWA(from, "Halo 😊\nKetik *menu* untuk mulai ya ☕");
 
         return res.sendStatus(200);
 
