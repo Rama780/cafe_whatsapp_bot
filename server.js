@@ -28,20 +28,15 @@ const Order = mongoose.model("Order", new mongoose.Schema({
         }
     ],
     total: Number,
-    status: {
-        type: String,
-        default: "pending"
-    },
-    waktu: {
-        type: Date,
-        default: Date.now
-    }
+    status: { type: String, default: "pending" },
+    waktu: { type: Date, default: Date.now }
 }));
 
 // ==========================
 // MEMORY
 // ==========================
 const lastOrderMap = {};
+const paymentChoice = {};
 
 // ==========================
 // MENU
@@ -76,7 +71,7 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
-// FUNCTION SEND WA
+// SEND WA TEXT
 // ==========================
 async function sendWA(to, text) {
     await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
@@ -89,6 +84,30 @@ async function sendWA(to, text) {
             messaging_product: "whatsapp",
             to,
             text: { body: text }
+        })
+    });
+}
+
+// ==========================
+// SEND QR IMAGE
+// ==========================
+async function sendQR(to) {
+    const qrImage = "https://i.ibb.co/your-qr-image.png"; // GANTI DENGAN QR KAMU
+
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to,
+            type: "image",
+            image: {
+                link: qrImage,
+                caption: "📱 Scan QR untuk bayar\n\nSetelah bayar ketik: sudah bayar"
+            }
         })
     });
 }
@@ -123,7 +142,32 @@ app.post("/whatsapp", async (req, res) => {
         }
 
         // ==========================
-        // 2. RIWAYAT
+        // 2. PILIH PEMBAYARAN
+        // ==========================
+        if (msg === "1" || msg === "2") {
+            const orderId = paymentChoice[from];
+
+            if (!orderId) {
+                await sendWA(from, "Tidak ada pesanan 😅");
+                return res.sendStatus(200);
+            }
+
+            // LINK
+            if (msg === "1") {
+                const link = `https://your-payment-link.com/pay/${orderId}`;
+                await sendWA(from, `💳 Bayar di sini:\n${link}\n\nSetelah bayar ketik: sudah bayar`);
+            }
+
+            // QR
+            if (msg === "2") {
+                await sendQR(from);
+            }
+
+            return res.sendStatus(200);
+        }
+
+        // ==========================
+        // 3. RIWAYAT
         // ==========================
         if (
             msg.includes("riwayat") ||
@@ -158,7 +202,7 @@ app.post("/whatsapp", async (req, res) => {
         }
 
         // ==========================
-        // 3. MENU
+        // 4. MENU
         // ==========================
         if (msg.includes("menu")) {
             await sendWA(from, "☕ latte 20k\ncappuccino 22k\namericano 18k");
@@ -166,7 +210,7 @@ app.post("/whatsapp", async (req, res) => {
         }
 
         // ==========================
-        // 4. ORDER
+        // 5. ORDER
         // ==========================
         if (
             msg.includes("latte") ||
@@ -189,11 +233,7 @@ app.post("/whatsapp", async (req, res) => {
 
                     detail += `- ${key} x${qty} = Rp${subtotal}\n`;
 
-                    itemsDB.push({
-                        nama: key,
-                        qty,
-                        harga
-                    });
+                    itemsDB.push({ nama: key, qty, harga });
                 }
             }
 
@@ -205,15 +245,17 @@ app.post("/whatsapp", async (req, res) => {
                 });
 
                 lastOrderMap[from] = newOrder._id;
+                paymentChoice[from] = newOrder._id;
 
-                const paymentLink = `https://your-payment-link.com/pay/${newOrder._id}`;
+                const reply = `🧾 Pesanan:
+${detail}
+💰 Total: Rp${total}
 
-                const reply = `🧾 Pesanan:\n${detail}\n💰 Total: Rp${total}
+💳 Pilih pembayaran:
+1. Link
+2. QR
 
-💳 Bayar:
-${paymentLink}
-
-Ketik: sudah bayar`;
+Ketik: 1 atau 2`;
 
                 await sendWA(from, reply);
             }
@@ -222,7 +264,7 @@ Ketik: sudah bayar`;
         }
 
         // ==========================
-        // 5. DEFAULT
+        // DEFAULT
         // ==========================
         await sendWA(from, "Ketik *menu* ya ☕");
         res.sendStatus(200);
