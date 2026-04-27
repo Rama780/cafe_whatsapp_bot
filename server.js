@@ -70,7 +70,7 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
-// SEND WA (DEBUG)
+// SEND WA
 // ==========================
 async function sendWA(to, text) {
     try {
@@ -143,10 +143,28 @@ app.post("/whatsapp", async (req, res) => {
         console.log("📩 PESAN:", msg);
 
         // ==========================
-        // MENU
+        // MENU (LEBIH RAMAH)
         // ==========================
         if (msg.includes("menu")) {
-            await sendWA(from, "☕ latte 20k\ncappuccino 22k\namericano 18k");
+
+            const greetings = [
+                "Halo! 👋 Selamat datang di cafe kami ☕",
+                "Hai! 😊 Mau pesan kopi hari ini?",
+                "Halo kak! ☕ Siap nemenin harimu dengan kopi terbaik"
+            ];
+
+            const greet = greetings[Math.floor(Math.random() * greetings.length)];
+
+            await sendWA(from, `${greet}
+
+📋 *Menu Hari Ini*:
+☕ Latte — Rp20.000  
+☕ Cappuccino — Rp22.000  
+☕ Americano — Rp18.000  
+
+Silakan langsung pesan ya 👍
+Contoh: *latte 2*`);
+
             return res.sendStatus(200);
         }
 
@@ -186,13 +204,14 @@ app.post("/whatsapp", async (req, res) => {
 
                 paymentChoice[from] = order._id;
 
-                await sendWA(from, `🧾 Pesanan:
+                await sendWA(from, `🧾 Pesanan kamu:
 ${detail}
 💰 Total: Rp${total}
 
-💳 Metode pembayaran:
-1. QRIS
-2. Transfer Bank
+Silakan pilih metode pembayaran ya 😊
+
+1. QRIS 📱
+2. Transfer Bank 🏦
 
 Ketik: 1 atau 2`);
             }
@@ -207,33 +226,43 @@ Ketik: 1 atau 2`);
             const orderId = paymentChoice[from];
 
             if (!orderId) {
-                await sendWA(from, "Tidak ada pesanan 😅");
+                await sendWA(from, "Ups, belum ada pesanan 😅\nKetik *menu* dulu ya ☕");
                 return res.sendStatus(200);
             }
 
-            // QRIS
             if (msg === "1") {
                 await sendQR(from);
             }
 
-            // TRANSFER
             if (msg === "2") {
-                await sendWA(from, `🏦 Transfer ke:
+                await sendWA(from, `🏦 Silakan transfer ke:
 
 Bank BCA
 No Rek: 1234567890
 A/N: Cafe Kamu
 
-Setelah bayar ketik: sudah bayar`);
+Setelah transfer, ketik *sudah bayar* ya 😊`);
             }
 
             return res.sendStatus(200);
         }
 
         // ==========================
+        // SUDAH BAYAR (RAMAH)
+        // ==========================
+        if (msg.includes("sudah bayar")) {
+            await sendWA(from, `🙏 Terima kasih ya!
+
+Pembayaran kamu sudah kami terima (akan dicek secara manual).
+
+☕ Pesanan sedang kami proses, mohon ditunggu sebentar 😊`);
+            return res.sendStatus(200);
+        }
+
+        // ==========================
         // DEFAULT
         // ==========================
-        await sendWA(from, "Ketik *menu* untuk mulai ☕");
+        await sendWA(from, "Halo 😊\nKetik *menu* untuk lihat daftar kopi kami ya ☕");
 
         return res.sendStatus(200);
 
