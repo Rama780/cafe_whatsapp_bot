@@ -9,7 +9,7 @@ app.use(express.json());
 console.log("🔥 SERVER START");
 
 // ==========================
-// DB
+// DATABASE
 // ==========================
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB connected"))
@@ -20,10 +20,22 @@ mongoose.connect(process.env.MONGO_URI)
 // ==========================
 const Order = mongoose.model("Order", new mongoose.Schema({
     user: String,
-    items: Array,
+    items: [
+        {
+            nama: String,
+            qty: Number,
+            harga: Number
+        }
+    ],
     total: Number,
-    status: { type: String, default: "pending" },
-    waktu: { type: Date, default: Date.now }
+    status: {
+        type: String,
+        default: "pending"
+    },
+    waktu: {
+        type: Date,
+        default: Date.now
+    }
 }));
 
 // ==========================
@@ -48,7 +60,7 @@ app.get("/", (req, res) => {
 });
 
 // ==========================
-// WEBHOOK VERIFY
+// VERIFY WEBHOOK
 // ==========================
 app.get("/whatsapp", (req, res) => {
     const VERIFY_TOKEN = "rama123";
@@ -64,6 +76,24 @@ app.get("/whatsapp", (req, res) => {
 });
 
 // ==========================
+// FUNCTION SEND WA
+// ==========================
+async function sendWA(to, text) {
+    await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to,
+            text: { body: text }
+        })
+    });
+}
+
+// ==========================
 // WEBHOOK
 // ==========================
 app.post("/whatsapp", async (req, res) => {
@@ -74,21 +104,71 @@ app.post("/whatsapp", async (req, res) => {
         const msg = value.messages[0].text.body.toLowerCase();
         const from = value.messages[0].from;
 
-        console.log("📩", msg);
-
-        let reply;
+        console.log("📩 PESAN:", msg);
 
         // ==========================
-        // MENU
+        // 1. KONFIRMASI BAYAR
         // ==========================
-        if (msg.includes("menu")) {
-            reply = "☕ latte 20k\ncappuccino 22k\namericano 18k";
+        if (msg.includes("sudah bayar")) {
+            const orderId = lastOrderMap[from];
+
+            if (!orderId) {
+                await sendWA(from, "Tidak ada transaksi 😅");
+            } else {
+                await Order.findByIdAndUpdate(orderId, { status: "paid" });
+                await sendWA(from, "✅ Pembayaran diterima!");
+            }
+
+            return res.sendStatus(200);
         }
 
         // ==========================
-        // ORDER
+        // 2. RIWAYAT
         // ==========================
-        else if (
+        if (
+            msg.includes("riwayat") ||
+            msg.includes("history") ||
+            msg.includes("pesanan")
+        ) {
+            const orders = await Order.find({ user: from })
+                .sort({ waktu: -1 })
+                .limit(5);
+
+            let reply;
+
+            if (orders.length === 0) {
+                reply = "Belum ada pesanan 😅";
+            } else {
+                reply = "🧾 Riwayat:\n\n";
+
+                orders.forEach((o, i) => {
+                    reply += `Pesanan ${i + 1}\n`;
+
+                    o.items.forEach(item => {
+                        reply += `- ${item.nama} x${item.qty}\n`;
+                    });
+
+                    reply += `💰 Rp${o.total}\n`;
+                    reply += `🕒 ${new Date(o.waktu).toLocaleString()}\n\n`;
+                });
+            }
+
+            await sendWA(from, reply);
+            return res.sendStatus(200);
+        }
+
+        // ==========================
+        // 3. MENU
+        // ==========================
+        if (msg.includes("menu")) {
+            await sendWA(from, "☕ latte 20k\ncappuccino 22k\namericano 18k");
+            return res.sendStatus(200);
+        }
+
+        // ==========================
+        // 4. ORDER
+        // ==========================
+        if (
             msg.includes("latte") ||
             msg.includes("cappuccino") ||
             msg.includes("americano")
@@ -109,7 +189,11 @@ app.post("/whatsapp", async (req, res) => {
 
                     detail += `- ${key} x${qty} = Rp${subtotal}\n`;
 
-                    itemsDB.push({ nama: key, qty, harga });
+                    itemsDB.push({
+                        nama: key,
+                        qty,
+                        harga
+                    });
                 }
             }
 
@@ -124,52 +208,23 @@ app.post("/whatsapp", async (req, res) => {
 
                 const paymentLink = `https://your-payment-link.com/pay/${newOrder._id}`;
 
-                reply = `🧾 Pesanan:\n${detail}\n💰 Total: Rp${total}
+                const reply = `🧾 Pesanan:\n${detail}\n💰 Total: Rp${total}
 
 💳 Bayar:
 ${paymentLink}
 
 Ketik: sudah bayar`;
+
+                await sendWA(from, reply);
             }
+
+            return res.sendStatus(200);
         }
 
         // ==========================
-        // KONFIRMASI BAYAR
+        // 5. DEFAULT
         // ==========================
-        else if (msg.includes("sudah bayar")) {
-            const orderId = lastOrderMap[from];
-
-            if (!orderId) {
-                reply = "Tidak ada transaksi 😅";
-            } else {
-                await Order.findByIdAndUpdate(orderId, { status: "paid" });
-                reply = "✅ Pembayaran diterima!";
-            }
-        }
-
-        // ==========================
-        // DEFAULT
-        // ==========================
-        else {
-            reply = "Ketik *menu* ya ☕";
-        }
-
-        // ==========================
-        // SEND WA
-        // ==========================
-        await fetch(`https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBERS_ID}/messages`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to: from,
-                text: { body: reply }
-            })
-        });
-
+        await sendWA(from, "Ketik *menu* ya ☕");
         res.sendStatus(200);
 
     } catch (err) {
@@ -182,5 +237,5 @@ Ketik: sudah bayar`;
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log("🚀 Jalan di port", PORT);
+    console.log("🚀 Server jalan di port", PORT);
 });
